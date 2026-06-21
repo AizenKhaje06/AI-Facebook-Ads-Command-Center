@@ -2,7 +2,7 @@
  * Two-Factor Authentication (2FA) with TOTP
  */
 
-import { authenticator } from 'otplib'
+import { TOTP, generateSecret as otpGenerateSecret, generateURI, verify as otpVerify } from 'otplib'
 import QRCode from 'qrcode'
 import crypto from 'crypto'
 import { createClient } from '@supabase/supabase-js'
@@ -14,24 +14,17 @@ const supabase = createClient(
 )
 
 /**
- * Configure TOTP authenticator
- */
-authenticator.options = {
-  window: 1, // Allow 1 step before/after current time for clock drift
-}
-
-/**
  * Generate TOTP secret for user
  */
 export function generateTOTPSecret(): string {
-  return authenticator.generateSecret()
+  return otpGenerateSecret()
 }
 
 /**
  * Generate OTP Auth URL for QR code
  */
 export function generateOTPAuthUrl(email: string, secret: string): string {
-  return authenticator.keyuri(email, 'AdPilot AI', secret)
+  return generateURI({ label: email, issuer: 'AdPilot AI', secret, algorithm: 'sha1', digits: 6, period: 30 })
 }
 
 /**
@@ -50,9 +43,10 @@ export async function generateQRCode(otpAuthUrl: string): Promise<string> {
 /**
  * Verify TOTP token
  */
-export function verifyTOTPToken(token: string, secret: string): boolean {
+export async function verifyTOTPToken(token: string, secret: string): Promise<boolean> {
   try {
-    return authenticator.verify({ token, secret })
+    const result = await otpVerify({ token, secret })
+    return result.valid
   } catch (error) {
     logger.error('TOTP verification error', error)
     return false
@@ -89,7 +83,7 @@ export async function enable2FA(
 ): Promise<{ success: boolean; backupCodes?: string[]; error?: string }> {
   try {
     // Verify token before enabling
-    if (!verifyTOTPToken(token, secret)) {
+    if (!(await verifyTOTPToken(token, secret))) {
       return { success: false, error: 'Invalid verification code' }
     }
 
@@ -185,7 +179,7 @@ export async function verify2FA(
     }
 
     // Check if it's a TOTP token
-    if (verifyTOTPToken(token, user.two_factor_secret)) {
+    if (await verifyTOTPToken(token, user.two_factor_secret)) {
       logger.info('2FA verified with TOTP', { userId })
       return { success: true }
     }

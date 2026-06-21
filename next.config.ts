@@ -4,6 +4,9 @@ const nextConfig: NextConfig = {
   // Output standalone for Docker
   output: 'standalone',
 
+  // Turbopack configuration (empty to suppress warning)
+  turbopack: {},
+
   // Security headers
   async headers() {
     return [

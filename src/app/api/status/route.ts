@@ -5,8 +5,8 @@
 
 import { NextResponse } from 'next/server'
 import { createClient } from '@/lib/supabase/server'
-import { syncQueue, alertQueue, reportQueue } from '@/lib/jobs/queue'
 import { metrics } from '@/lib/metrics'
+import { syncQueue, alertQueue, reportQueue } from '@/lib/jobs/queue.stub'
 
 export async function GET() {
   const supabase = await createClient()
