@@ -12,14 +12,12 @@ export async function GET(request: Request) {
 
   const { searchParams } = new URL(request.url)
   const connectionId = searchParams.get('connection_id')
-  const adAccountId = searchParams.get('ad_account_id')
-  const limit = parseInt(searchParams.get('limit') || '20')
 
   if (!connectionId) {
     return NextResponse.json({ error: 'connection_id is required' }, { status: 400 })
   }
 
-  // Verify access
+  // Verify user has access to this connection
   const { data: connection } = await supabase
     .from('meta_connections')
     .select('workspace_id')
@@ -41,32 +39,42 @@ export async function GET(request: Request) {
     return NextResponse.json({ error: 'Access denied' }, { status: 403 })
   }
 
-  // Fetch sync logs
-  let query = supabase
+  // Get sync logs
+  const { data: logs, error: logsError } = await supabase
     .from('meta_sync_logs')
     .select('*')
     .eq('meta_connection_id', connectionId)
     .order('created_at', { ascending: false })
-    .limit(limit)
+    .limit(20)
 
-  if (adAccountId) {
-    query = query.eq('ad_account_id', adAccountId)
+  if (logsError) {
+    console.error('Error fetching sync logs:', logsError)
+    return NextResponse.json({ error: 'Failed to fetch logs' }, { status: 500 })
   }
 
-  const { data: logs, error } = await query
-
-  if (error) {
-    return NextResponse.json({ error: error.message }, { status: 500 })
-  }
-
-  // Fetch sync state
+  // Get sync state summary
   const { data: syncState } = await supabase
-    .from('meta_sync_state')
-    .select('*')
+    .from('meta_sync_logs')
+    .select('entity_type, completed_at, status')
     .eq('meta_connection_id', connectionId)
+    .eq('status', 'completed')
+    .order('completed_at', { ascending: false })
+
+  // Group by entity type to get last successful sync
+  const stateMap = new Map()
+  syncState?.forEach(log => {
+    if (!stateMap.has(log.entity_type)) {
+      stateMap.set(log.entity_type, {
+        entity_type: log.entity_type,
+        last_sync_at: log.completed_at,
+        last_successful_sync_at: log.completed_at,
+        error_count: 0
+      })
+    }
+  })
 
   return NextResponse.json({
-    logs,
-    syncState
+    logs: logs || [],
+    syncState: Array.from(stateMap.values())
   })
 }

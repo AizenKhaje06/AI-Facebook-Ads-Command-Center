@@ -91,6 +91,10 @@ export default function AdAccountsPage() {
     setError(null)
 
     try {
+      // Set a timeout for the fetch request
+      const controller = new AbortController()
+      const timeoutId = setTimeout(() => controller.abort(), 60000) // 60 second timeout
+
       const response = await fetch('/api/meta/sync', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
@@ -99,13 +103,41 @@ export default function AdAccountsPage() {
           entityType,
           syncType: 'manual',
           daysBack: 30
-        })
+        }),
+        signal: controller.signal
       })
+
+      clearTimeout(timeoutId)
 
       const data = await response.json()
 
       if (!response.ok) {
         throw new Error(data.error || 'Sync failed')
+      }
+
+      console.log('Sync completed:', data)
+
+      // Show success message with details
+      if (data.synced) {
+        const total = data.synced.total || 0
+        const duration = data.duration || 0
+        const accountsProcessed = data.accountsProcessed || 0
+        const totalAccounts = data.totalAccounts || 0
+        
+        setError(null)
+        
+        let message = `✅ Sync completed in ${duration}s!\n\n`
+        message += `📊 Synced ${total} items:\n`
+        message += `• ${data.synced.campaigns || 0} campaigns\n`
+        message += `• ${data.synced.adsets || 0} ad sets\n`
+        message += `• ${data.synced.ads || 0} ads\n`
+        
+        if (totalAccounts > accountsProcessed) {
+          message += `\n⚠️ Note: Processed ${accountsProcessed} of ${totalAccounts} ad accounts to prevent timeout.\n`
+          message += `Run sync again to process remaining accounts.`
+        }
+        
+        alert(message)
       }
 
       // Refresh data
@@ -114,7 +146,13 @@ export default function AdAccountsPage() {
         await fetchSyncLogs(connectionId)
       }
     } catch (e: any) {
-      setError(`Sync failed: ${e.message}`)
+      console.error('Sync error:', e)
+      
+      if (e.name === 'AbortError') {
+        setError('Sync is taking longer than expected. It may still be running in the background. Please check back in a moment.')
+      } else {
+        setError(`Sync failed: ${e.message}`)
+      }
     } finally {
       setSyncing(null)
     }
