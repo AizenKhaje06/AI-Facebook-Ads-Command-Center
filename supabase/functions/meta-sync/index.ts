@@ -8,27 +8,15 @@ const corsHeaders = {
 };
 
 const ENCRYPTION_KEY = Deno.env.get('ENCRYPTION_KEY')!;
-const META_APP_ID = Deno.env.get('META_APP_ID')!;
-const META_APP_SECRET = Deno.env.get('META_APP_SECRET')!;
-
-// Rate limiting configuration
-const RATE_LIMIT_THRESHOLD = 100; // Minimum remaining calls before backing off
-const RATE_LIMIT_BACKOFF_MS = 60000; // 1 minute backoff
+const RATE_LIMIT_THRESHOLD = 100;
+const RATE_LIMIT_BACKOFF_MS = 60000;
 
 interface SyncOptions {
   connectionId: string;
   adAccountId?: string;
   entityType: 'all' | 'business_managers' | 'ad_accounts' | 'campaigns' | 'adsets' | 'ads' | 'insights';
   syncType: 'full' | 'incremental' | 'manual' | 'scheduled';
-  daysBack?: number; // For insights - how many days back to fetch
-}
-
-interface SyncResult {
-  success: boolean;
-  processed: number;
-  failed: number;
-  error?: string;
-  rateLimitRemaining?: number;
+  daysBack?: number;
 }
 
 function decrypt(encrypted: string): string {
@@ -59,9 +47,7 @@ async function metaApiRequest(
     throw new Error(data.error.message || 'Meta API error');
   }
 
-  // Extract rate limit info from headers if available
   const rateLimitRemaining = parseInt(response.headers.get('x-business-use-case-usage-rate-limit-remaining') || '1000');
-
   return { data, rateLimitRemaining };
 }
 
@@ -117,8 +103,14 @@ async function fetchInsights(
   level: 'account' | 'campaign' | 'adset' | 'ad'
 ): Promise<{ data: any[]; rateLimitRemaining: number }> {
   const params: Record<string, string> = {
-    fields: 'impressions,clicks,unique_clicks,spend,reach,frequency,cpm,cpc,ctr,actions,conversions,conversion_value,cost_per_conversion,purchase_roas,purchases,purchase_value,date_start,date_stop',
-    date_preset: 'last_30d',
+    fields: `impressions,clicks,unique_clicks,spend,reach,frequency,cpm,cpc,ctr,
+      unique_impressions,unique_ctr,unique_link_clicks,unique_link_click_ctr,
+      actions,conversions,conversion_value,cost_per_conversion,purchase_roas,
+      purchases,purchase_value,date_start,date_stop,
+      video_play_actions,video_avg_time_watched,
+      video_p25_watched_actions,video_p50_watched_actions,video_p75_watched_actions,video_p100_watched_actions,
+      video_thruplay_actions,video_time_watched_seconds,
+      landing_page_views,engaged_users`.replace(/\s+/g, ''),
     level: level,
     time_range: JSON.stringify({ since: dateRange.start, until: dateRange.end }),
     limit: '100'
@@ -129,6 +121,12 @@ async function fetchInsights(
     data: result.data.data || [],
     rateLimitRemaining: result.rateLimitRemaining
   };
+}
+
+function extractActionValue(actions: any[] | undefined, actionType: string): number {
+  if (!actions || !Array.isArray(actions)) return 0;
+  const action = actions.find((a: any) => a.action_type === actionType);
+  return action ? parseInt(action.value) || 0 : 0;
 }
 
 async function createSyncLog(supabase: any, options: SyncOptions): Promise<string> {
@@ -206,7 +204,7 @@ async function upsertAdSets(supabase: any, connectionId: string, adAccountId: st
     start_time: as.start_time,
     end_time: as.end_time,
     last_synced_at: new Date().toISOString()
-  })).filter(r => r.campaign_id); // Only insert if we have the campaign FK
+  })).filter(r => r.campaign_id);
 
   if (records.length === 0) return;
 
@@ -240,30 +238,46 @@ async function upsertAds(supabase: any, connectionId: string, adAccountId: strin
 }
 
 async function upsertInsights(supabase: any, connectionId: string, adAccountId: string, insights: any[], entityType: string, entityMetaId: string) {
-  const records = insights.map(ins => ({
-    meta_connection_id: connectionId,
-    ad_account_id: adAccountId,
-    entity_type: entityType,
-    entity_id_meta: entityMetaId,
-    date: ins.date_start,
-    impressions: parseInt(ins.impressions) || 0,
-    clicks: parseInt(ins.clicks) || 0,
-    unique_clicks: parseInt(ins.unique_clicks) || 0,
-    spend: parseFloat(ins.spend) || 0,
-    reach: parseInt(ins.reach) || 0,
-    frequency: parseFloat(ins.frequency) || 0,
-    cpm: parseFloat(ins.cpm) || 0,
-    cpc: parseFloat(ins.cpc) || 0,
-    ctr: parseFloat(ins.ctr) || 0,
-    actions: ins.actions,
-    conversions: parseInt(ins.conversions) || 0,
-    conversion_value: parseFloat(ins.conversion_value) || 0,
-    cost_per_conversion: parseFloat(ins.cost_per_conversion) || 0,
-    roas: parseFloat(ins.purchase_roas) || 0,
-    purchases: parseInt(ins.purchases) || 0,
-    purchase_value: parseFloat(ins.purchase_value) || 0,
-    last_synced_at: new Date().toISOString()
-  }));
+  const records = insights.map(ins => {
+    const actions = ins.actions || [];
+    const spend = parseFloat(ins.spend) || 0;
+    const conversions = parseInt(ins.conversions) || extractActionValue(actions, 'purchase') || 0;
+    const purchases = extractActionValue(actions, 'purchase') || parseInt(ins.purchases) || 0;
+    const purchaseValue = parseFloat(ins.purchase_value) || extractActionValue(actions, 'omni_purchase') || 0;
+
+    return {
+      meta_connection_id: connectionId,
+      ad_account_id: adAccountId,
+      entity_type: entityType,
+      entity_id_meta: entityMetaId,
+      date: ins.date_start,
+      impressions: parseInt(ins.impressions) || 0,
+      clicks: parseInt(ins.clicks) || 0,
+      unique_clicks: parseInt(ins.unique_clicks) || 0,
+      spend: spend,
+      reach: parseInt(ins.reach) || 0,
+      frequency: parseFloat(ins.frequency) || 0,
+      cpm: parseFloat(ins.cpm) || 0,
+      cpc: parseFloat(ins.cpc) || 0,
+      ctr: parseFloat(ins.ctr) || 0,
+      actions: ins.actions,
+      conversions: conversions,
+      conversion_value: parseFloat(ins.conversion_value) || 0,
+      cost_per_conversion: parseFloat(ins.cost_per_conversion) || 0,
+      roas: parseFloat(ins.purchase_roas) || (spend > 0 ? purchaseValue / spend : 0),
+      purchases: purchases,
+      purchase_value: purchaseValue,
+      add_to_cart: extractActionValue(actions, 'add_to_cart'),
+      checkout: extractActionValue(actions, 'initiate_checkout'),
+      leads: extractActionValue(actions, 'lead'),
+      video_p100_watched_actions: parseInt(ins.video_p100_watched_actions) || extractActionValue(actions, 'video_p100_watched'),
+      video_thruplay_actions: parseInt(ins.video_thruplay_actions) || 0,
+      video_time_watched_seconds: parseInt(ins.video_time_watched_seconds) || 0,
+      landing_page_views: parseInt(ins.landing_page_views) || extractActionValue(actions, 'landing_page_view'),
+      total_revenue: purchaseValue + extractActionValue(actions, 'omni_initiate_checkout'),
+      last_synced_at: new Date().toISOString()
+    };
+  });
 
   if (records.length === 0) return;
 
@@ -299,10 +313,8 @@ Deno.serve(async (req: Request) => {
   try {
     const body = await req.json();
     const options: SyncOptions = body;
+    const { connectionId, entityType, syncType, daysBack } = options;
 
-    const { connectionId, adAccountId, entityType, syncType, daysBack } = options;
-
-    // Get connection and decrypt token
     const { data: connection, error: connError } = await supabase
       .from('meta_connections')
       .select('*')
@@ -314,8 +326,6 @@ Deno.serve(async (req: Request) => {
     }
 
     const accessToken = decrypt(connection.encrypted_access_token);
-
-    // Create sync log
     const logId = await createSyncLog(supabase, options);
 
     let processedCount = 0;
@@ -323,21 +333,17 @@ Deno.serve(async (req: Request) => {
     let rateLimitRemaining = 1000;
 
     try {
-      // Process based on entity type
       if (entityType === 'all' || entityType === 'campaigns') {
-        // Fetch ad accounts for this connection
         const { data: adAccounts } = await supabase
           .from('meta_ad_accounts')
           .select('id, ad_account_id')
           .eq('meta_connection_id', connectionId);
 
         for (const account of adAccounts || []) {
-          // Fetch and store campaigns
           let after: string | undefined;
           let hasMore = true;
 
           while (hasMore) {
-            // Rate limit check
             if (rateLimitRemaining < RATE_LIMIT_THRESHOLD) {
               await new Promise(resolve => setTimeout(resolve, RATE_LIMIT_BACKOFF_MS));
             }
@@ -357,12 +363,10 @@ Deno.serve(async (req: Request) => {
             }
           }
         }
-
         await updateSyncState(supabase, connectionId, undefined, 'campaigns', true, logId);
       }
 
       if (entityType === 'all' || entityType === 'adsets') {
-        // Get all campaigns
         const { data: campaigns } = await supabase
           .from('meta_campaigns')
           .select('id, campaign_id, ad_account_id')
@@ -399,12 +403,10 @@ Deno.serve(async (req: Request) => {
             }
           }
         }
-
         await updateSyncState(supabase, connectionId, undefined, 'adsets', true, logId);
       }
 
       if (entityType === 'all' || entityType === 'ads') {
-        // Get all ad sets
         const { data: adSets } = await supabase
           .from('meta_ad_sets')
           .select('id, adset_id, ad_account_id, campaign_id, campaign_id_meta')
@@ -413,7 +415,6 @@ Deno.serve(async (req: Request) => {
         const campaignMap = new Map<string, string>();
         const adSetMap = new Map(adSets?.map(as => [as.adset_id, as.id]) || []);
 
-        // Get campaign FK mapping
         const { data: campaigns } = await supabase
           .from('meta_campaigns')
           .select('id, campaign_id')
@@ -449,12 +450,10 @@ Deno.serve(async (req: Request) => {
             }
           }
         }
-
         await updateSyncState(supabase, connectionId, undefined, 'ads', true, logId);
       }
 
       if (entityType === 'all' || entityType === 'insights') {
-        // Calculate date range
         const endDate = new Date();
         const startDate = new Date();
         startDate.setDate(startDate.getDate() - (daysBack || 30));
@@ -464,7 +463,6 @@ Deno.serve(async (req: Request) => {
           end: endDate.toISOString().split('T')[0]
         };
 
-        // Get all ad accounts
         const { data: adAccounts } = await supabase
           .from('meta_ad_accounts')
           .select('id, ad_account_id')
@@ -488,10 +486,32 @@ Deno.serve(async (req: Request) => {
           }
         }
 
+        const { data: campaigns } = await supabase
+          .from('meta_campaigns')
+          .select('id, campaign_id, ad_account_id')
+          .eq('meta_connection_id', connectionId);
+
+        for (const campaign of campaigns || []) {
+          if (rateLimitRemaining < RATE_LIMIT_THRESHOLD) {
+            await new Promise(resolve => setTimeout(resolve, RATE_LIMIT_BACKOFF_MS));
+          }
+
+          try {
+            const result = await fetchInsights(accessToken, campaign.campaign_id, dateRange, 'campaign');
+            rateLimitRemaining = result.rateLimitRemaining;
+
+            if (result.data.length > 0) {
+              await upsertInsights(supabase, connectionId, campaign.ad_account_id, result.data, 'campaign', campaign.campaign_id);
+              processedCount += result.data.length;
+            }
+          } catch (e) {
+            failedCount++;
+          }
+        }
+
         await updateSyncState(supabase, connectionId, undefined, 'insights', true, logId);
       }
 
-      // Update sync log as completed
       await updateSyncLog(supabase, logId, {
         status: failedCount > 0 ? 'partial' : 'completed',
         total_records: processedCount,
