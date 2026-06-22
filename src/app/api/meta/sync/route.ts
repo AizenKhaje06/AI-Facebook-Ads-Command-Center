@@ -415,6 +415,18 @@ export async function POST(request: Request) {
       console.log(`Processed account: ${acc.metaId} (UUID: ${acc.uuid})`)
     })
 
+    // Build a helpful message based on results
+    let message = null
+    if (totalCampaigns + totalAdSets + totalAds === 0) {
+      message = 'Sync completed but no data found. This could mean:\n'
+      message += '• Your ad accounts don\'t have any campaigns yet\n'
+      message += '• The ad accounts are in development/test mode\n'
+      message += '• You may need to create campaigns in Facebook Ads Manager first\n\n'
+      message += `Processed ${accountsToProcess.length} of ${adAccountIds.length} ad accounts.`
+    } else if (accountsToProcess.length < adAccountIds.length) {
+      message = `Note: Processed ${accountsToProcess.length} of ${adAccountIds.length} ad accounts to prevent timeout. Run sync again to process remaining accounts.`
+    }
+
     return NextResponse.json({
       success: true,
       synced: {
@@ -426,9 +438,8 @@ export async function POST(request: Request) {
       duration: durationSeconds,
       accountsProcessed: accountsToProcess.length,
       totalAccounts: adAccountIds.length,
-      message: totalCampaigns + totalAdSets + totalAds === 0 
-        ? 'Sync completed but no data found. The ad accounts may not have any campaigns, ad sets, or ads yet.' 
-        : null
+      accountsWithData: processedRecords > 0 ? accountsToProcess.length : 0,
+      message
     })
 
   } catch (error: any) {

@@ -126,18 +126,24 @@ export default function AdAccountsPage() {
         
         setError(null)
         
-        let message = `✅ Sync completed in ${duration}s!\n\n`
-        message += `📊 Synced ${total} items:\n`
-        message += `• ${data.synced.campaigns || 0} campaigns\n`
-        message += `• ${data.synced.adsets || 0} ad sets\n`
-        message += `• ${data.synced.ads || 0} ads\n`
-        
-        if (totalAccounts > accountsProcessed) {
-          message += `\n⚠️ Note: Processed ${accountsProcessed} of ${totalAccounts} ad accounts to prevent timeout.\n`
-          message += `Run sync again to process remaining accounts.`
+        if (total === 0) {
+          // No data found - show special message
+          setError(data.message || 'No campaigns, ad sets, or ads found in your ad accounts. You may need to create campaigns in Facebook Ads Manager first.')
+        } else {
+          // Data found - show success message
+          let message = `✅ Sync completed in ${duration}s!\n\n`
+          message += `📊 Synced ${total} items:\n`
+          message += `• ${data.synced.campaigns || 0} campaigns\n`
+          message += `• ${data.synced.adsets || 0} ad sets\n`
+          message += `• ${data.synced.ads || 0} ads\n`
+          
+          if (totalAccounts > accountsProcessed) {
+            message += `\n⚠️ Note: Processed ${accountsProcessed} of ${totalAccounts} ad accounts to prevent timeout.\n`
+            message += `Run sync again to process remaining accounts.`
+          }
+          
+          alert(message)
         }
-        
-        alert(message)
       }
 
       // Refresh data
