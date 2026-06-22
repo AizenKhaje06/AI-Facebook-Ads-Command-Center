@@ -60,17 +60,28 @@ export default function AdAccountFilter() {
             onChange={(e) => setSelectedAdAccount(e.target.value === 'all' ? null : e.target.value)}
             className="appearance-none bg-slate-800/50 border border-slate-700 text-white pl-10 pr-10 py-2.5 rounded-lg focus:outline-none focus:border-blue-500 focus:ring-1 focus:ring-blue-500 text-sm min-w-[250px]"
           >
-            <option value="all">All Ad Accounts</option>
+            <option value="all">
+              All Ad Accounts ({filteredAdAccounts.length})
+            </option>
             
             {/* Show filtered accounts */}
-            {filteredAdAccounts.map((acc) => (
-              <option key={acc.id} value={acc.id}>
-                {acc.name} ({acc.ad_account_id.replace('act_', '')})
-              </option>
-            ))}
+            {filteredAdAccounts.length > 0 ? (
+              filteredAdAccounts.map((acc) => (
+                <option key={acc.id} value={acc.id}>
+                  {acc.name} ({acc.ad_account_id.replace('act_', '')})
+                </option>
+              ))
+            ) : selectedBusinessManagerId ? (
+              <option disabled>No accounts linked to this portfolio</option>
+            ) : null}
           </select>
           <ChevronDown className="absolute right-3 top-1/2 -translate-y-1/2 w-4 h-4 text-slate-400 pointer-events-none" />
         </div>
+        {selectedBusinessManagerId && filteredAdAccounts.length === 0 && (
+          <p className="text-xs text-amber-400 mt-1">
+            No accounts linked. Select "All Portfolios" to see all accounts.
+          </p>
+        )}
       </div>
 
       {/* Selected indicator */}

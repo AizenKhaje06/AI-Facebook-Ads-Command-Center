@@ -56,6 +56,8 @@ export function AdAccountFilterProvider({
   const [error, setError] = useState<string | null>(null)
 
   // Filter ad accounts based on selected BM
+  // If BM selected: show linked accounts
+  // If no BM selected: show all accounts
   const filteredAdAccounts = selectedBusinessManagerId
     ? adAccounts.filter(acc => acc.business_manager_id === selectedBusinessManagerId)
     : adAccounts
@@ -148,8 +150,23 @@ export function AdAccountFilterProvider({
 
 export function useAdAccountFilter() {
   const context = useContext(AdAccountFilterContext)
+  
+  // Return safe defaults if provider is not available
   if (context === undefined) {
-    throw new Error('useAdAccountFilter must be used within AdAccountFilterProvider')
+    console.warn('useAdAccountFilter used outside of AdAccountFilterProvider - returning defaults')
+    return {
+      selectedBusinessManagerId: null,
+      selectedAdAccountId: null,
+      businessManagers: [],
+      adAccounts: [],
+      filteredAdAccounts: [],
+      setSelectedBusinessManager: () => {},
+      setSelectedAdAccount: () => {},
+      refreshData: async () => {},
+      loading: false,
+      error: null
+    }
   }
+  
   return context
 }
