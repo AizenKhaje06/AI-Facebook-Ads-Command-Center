@@ -313,9 +313,11 @@ export function DashboardLayout({ children }: { children: React.ReactNode }) {
             </button>
             
             {/* Ad Account Filter - Desktop */}
-            <div className="hidden lg:block flex-1">
-              <AdAccountFilter />
-            </div>
+            {currentWorkspace && (
+              <div className="hidden lg:block flex-1">
+                <AdAccountFilter />
+              </div>
+            )}
             
             <div className="flex items-center gap-3">
               <NotificationBell />
@@ -323,9 +325,11 @@ export function DashboardLayout({ children }: { children: React.ReactNode }) {
           </div>
           
           {/* Ad Account Filter - Mobile */}
-          <div className="lg:hidden mt-4">
-            <AdAccountFilter />
-          </div>
+          {currentWorkspace && (
+            <div className="lg:hidden mt-4">
+              <AdAccountFilter />
+            </div>
+          )}
         </div>
 
         <main className="p-4 lg:p-8 animate-fadeIn">{children}</main>
