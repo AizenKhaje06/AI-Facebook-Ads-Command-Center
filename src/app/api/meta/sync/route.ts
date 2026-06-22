@@ -136,15 +136,56 @@ export async function POST(request: Request) {
         }]
       }
     } else {
-      // Get all ad accounts using new client with business manager info
-      console.log('Fetching ad accounts for connection:', connectionId)
-      const adAccountsData = await metaClient.request<{ data: any[] }>('/me/adaccounts', {
+      // IMPROVED: Fetch ad accounts from both user level AND business managers
+      const allAdAccountsData: any[] = []
+      
+      // First, get user's direct ad accounts
+      console.log('Fetching user ad accounts for connection:', connectionId)
+      const userAdAccountsData = await metaClient.request<{ data: any[] }>('/me/adaccounts', {
         params: {
           fields: 'id,name,account_status,currency,timezone_name,amount_spent,balance,business'
         }
       })
-
-      console.log(`Found ${adAccountsData.data?.length || 0} ad accounts`)
+      
+      if (userAdAccountsData.data) {
+        allAdAccountsData.push(...userAdAccountsData.data)
+      }
+      
+      console.log(`Found ${userAdAccountsData.data?.length || 0} user-level ad accounts`)
+      
+      // Then, fetch ad accounts from each business manager
+      for (const bm of businessManagers) {
+        try {
+          console.log(`Fetching ad accounts for BM: ${bm.name} (${bm.id})`)
+          const bmAdAccountsData = await metaClient.request<{ data: any[] }>(`/${bm.id}/owned_ad_accounts`, {
+            params: {
+              fields: 'id,name,account_status,currency,timezone_name,amount_spent,balance'
+            }
+          })
+          
+          if (bmAdAccountsData.data && bmAdAccountsData.data.length > 0) {
+            console.log(`  → Found ${bmAdAccountsData.data.length} ad accounts in ${bm.name}`)
+            // Add BM ID to each account
+            bmAdAccountsData.data.forEach(acc => {
+              acc.business_manager_meta_id = bm.id
+            })
+            allAdAccountsData.push(...bmAdAccountsData.data)
+          }
+        } catch (bmError: any) {
+          console.warn(`Failed to fetch ad accounts for BM ${bm.name}:`, bmError.message)
+        }
+      }
+      
+      // Remove duplicates (an account might appear in both user and BM lists)
+      const uniqueAccounts = new Map()
+      allAdAccountsData.forEach(acc => {
+        if (!uniqueAccounts.has(acc.id) || acc.business_manager_meta_id) {
+          uniqueAccounts.set(acc.id, acc)
+        }
+      })
+      
+      const adAccountsData = Array.from(uniqueAccounts.values())
+      console.log(`Total unique ad accounts after deduplication: ${adAccountsData.length}`)
       
       // Get BM UUID mappings
       const { data: bmMappings } = await supabase
@@ -155,12 +196,13 @@ export async function POST(request: Request) {
       const bmMap = new Map(bmMappings?.map(bm => [bm.business_manager_id, bm.id]) || [])
       
       // Save ad accounts to database (batch upsert) and get UUIDs
-      if (adAccountsData.data && adAccountsData.data.length > 0) {
-        const accountsToUpsert = adAccountsData.data.map(account => {
+      if (adAccountsData.length > 0) {
+        const accountsToUpsert = adAccountsData.map(account => {
           // Try to find business manager UUID
-          const businessManagerId = account.business?.id 
-            ? bmMap.get(account.business.id) || null
-            : null
+          // Priority: 1) From BM fetch, 2) From account.business field
+          const businessManagerId = account.business_manager_meta_id
+            ? bmMap.get(account.business_manager_meta_id) || null
+            : (account.business?.id ? bmMap.get(account.business.id) || null : null)
           
           return {
             meta_connection_id: connectionId,
